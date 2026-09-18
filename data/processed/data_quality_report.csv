@@ -1,0 +1,8 @@
+check,status,severity,affected_rows,details
+required_columns,PASS,info,0,All required columns are present.
+duplicate_city_timestamp,PASS,info,0,No duplicate city/timestamp rows found.
+required_field_nulls,FAIL,medium,61,Null values found in required analytical fields.
+non_negative_pollutants,PASS,info,0,All pollutant concentrations are non-negative.
+aqi_plausible_range,FAIL,medium,7,AQI values outside the configured plausibility range were detected.
+expected_city_coverage,PASS,info,0,All configured cities are represented in the processed dataset.
+valid_timestamps,PASS,info,0,All timestamps are parseable.

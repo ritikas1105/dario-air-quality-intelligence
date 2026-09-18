@@ -1,0 +1,8 @@
+city,country,avg_aqi,max_aqi,avg_pm2_5,max_pm2_5,elevated_aqi_hours,unhealthy_aqi_hours,observed_hours,elevated_hour_pct,operational_priority_score,priority_rank
+Delhi,India,160.7,223.0,64.7,136.9,165,126,168,98.2,84.8,1
+Mumbai,India,71.4,207.0,16.6,42.6,17,7,168,10.1,31.7,2
+Singapore,Singapore,90.6,121.0,29.6,64.3,41,0,168,24.4,30.8,3
+New York,United States,54.5,73.0,12.2,30.2,0,0,168,0.0,10.3,4
+Bengaluru,India,52.0,69.0,10.0,52.9,0,0,168,0.0,9.5,5
+San Francisco,United States,52.8,56.0,10.3,13.4,0,0,168,0.0,8.1,6
+London,United Kingdom,35.0,59.0,7.1,22.6,0,0,168,0.0,7.9,7

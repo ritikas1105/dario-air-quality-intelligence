@@ -1,0 +1,26 @@
+{
+  "run_id": "20260918T141007Z",
+  "completed_at_utc": "2026-09-18T14:10:09.468198+00:00",
+  "source": "https://air-quality-api.open-meteo.com/v1/air-quality",
+  "configured_cities": [
+    "Delhi",
+    "Mumbai",
+    "Bengaluru",
+    "London",
+    "New York",
+    "San Francisco",
+    "Singapore"
+  ],
+  "successful_cities": [
+    "Bengaluru",
+    "Delhi",
+    "London",
+    "Mumbai",
+    "New York",
+    "San Francisco",
+    "Singapore"
+  ],
+  "failed_cities": [],
+  "row_count": 1176,
+  "quality_failures": 2
+}
