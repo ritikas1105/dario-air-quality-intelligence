@@ -7,24 +7,25 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from src.transform import aqi_category, build_city_summary
+
 BASE_DIR = Path(__file__).resolve().parent
 PROCESSED_DIR = BASE_DIR / "data" / "processed"
 
 st.set_page_config(
-    page_title="Air Quality & Health Risk Intelligence",
+    page_title="Air Quality Operational Intelligence",
     page_icon="🌿",
     layout="wide",
 )
 
 
 @st.cache_data
-def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
+def load_data() -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     hourly_path = PROCESSED_DIR / "air_quality_hourly.csv"
-    summary_path = PROCESSED_DIR / "city_summary.csv"
     quality_path = PROCESSED_DIR / "data_quality_report.csv"
     metadata_path = PROCESSED_DIR / "etl_run_metadata.json"
 
-    required = [hourly_path, summary_path, quality_path, metadata_path]
+    required = [hourly_path, quality_path, metadata_path]
     missing = [path.name for path in required if not path.exists()]
     if missing:
         raise FileNotFoundError(
@@ -34,34 +35,26 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
         )
 
     hourly = pd.read_csv(hourly_path, parse_dates=["timestamp"])
-    summary = pd.read_csv(summary_path)
+    # Reclassify persisted data so older "Unknown" labels and invalid AQI
+    # cannot leak into the dashboard's categories, metrics, or ranking.
+    hourly["us_aqi"] = pd.to_numeric(hourly["us_aqi"], errors="coerce")
+    hourly["aqi_category"] = hourly["us_aqi"].apply(aqi_category)
+    hourly.loc[hourly["aqi_category"] == "Unavailable", "us_aqi"] = float("nan")
+    hourly["is_elevated_aqi"] = hourly["us_aqi"] > 100
+    hourly["is_unhealthy_aqi"] = hourly["us_aqi"] > 150
     quality = pd.read_csv(quality_path)
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    return hourly, summary, quality, metadata
+    return hourly, quality, metadata
 
 
-def aqi_context(value: float) -> str:
-    if value <= 50:
-        return "Good"
-    if value <= 100:
-        return "Moderate"
-    if value <= 150:
-        return "Unhealthy for sensitive groups"
-    if value <= 200:
-        return "Unhealthy"
-    if value <= 300:
-        return "Very unhealthy"
-    return "Hazardous"
-
-
-st.title("Air Quality & Health Risk Intelligence")
+st.title("Air Quality Operational Intelligence")
 st.caption(
     "A lightweight environmental-health decision product built from the Open-Meteo Air Quality API. "
     "It is designed for operational prioritization, not clinical diagnosis or medical advice."
 )
 
 try:
-    hourly_df, summary_df, quality_df, metadata = load_data()
+    hourly_df, quality_df, metadata = load_data()
 except FileNotFoundError as exc:
     st.error(str(exc))
     st.code("python etl.py\nstreamlit run app.py", language="bash")
@@ -93,19 +86,32 @@ if filtered.empty:
     st.warning("No rows match the current filters.")
     st.stop()
 
-filtered_summary = summary_df[summary_df["city"].isin(selected_cities)].copy()
+if not filtered["us_aqi"].notna().any():
+    st.info("AQI unavailable for the selected scope.")
+    st.stop()
+
+filtered_summary = build_city_summary(filtered)
+unranked = filtered_summary["operational_priority_score"].isna()
+if unranked.any():
+    st.caption(
+        "Priority unavailable for: "
+        + ", ".join(filtered_summary.loc[unranked, "city"])
+        + ". Insufficient data in the selected scope."
+    )
+filtered_summary = filtered_summary.loc[~unranked].copy()
+filtered_summary["priority_rank"] = range(1, len(filtered_summary) + 1)
 
 kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 kpi1.metric("Cities monitored", filtered["city"].nunique())
-kpi2.metric("Average AQI", f"{filtered['us_aqi'].mean():.0f}", aqi_context(filtered["us_aqi"].mean()))
-kpi3.metric("Peak AQI", f"{filtered['us_aqi'].max():.0f}", aqi_context(filtered["us_aqi"].max()))
+kpi2.metric("Average AQI", f"{filtered['us_aqi'].mean():.0f}", aqi_category(filtered["us_aqi"].mean()))
+kpi3.metric("Peak AQI", f"{filtered['us_aqi'].max():.0f}", aqi_category(filtered["us_aqi"].max()))
 kpi4.metric("Hours AQI > 100", int((filtered["us_aqi"] > 100).sum()))
 
 st.subheader("Where attention is needed")
 if not filtered_summary.empty:
     leader = filtered_summary.sort_values("operational_priority_score", ascending=False).iloc[0]
     st.info(
-        f"**{leader['city']}** currently ranks highest in the operational prioritization model "
+        f"**{leader['city']}** ranks highest within the selected scope "
         f"(score {leader['operational_priority_score']:.1f}). It has a peak AQI of "
         f"{leader['max_aqi']:.0f} and {leader['elevated_hour_pct']:.1f}% of observed/forecast hours above AQI 100."
     )
@@ -163,6 +169,7 @@ with right:
     st.plotly_chart(category_fig, use_container_width=True)
 
 st.subheader("Data quality & pipeline health")
+st.caption("Pipeline checks below cover the full ETL run, independently of the city/category filters.")
 failed_checks = quality_df[quality_df["status"] == "FAIL"]
 q1, q2, q3 = st.columns(3)
 q1.metric("Quality checks", len(quality_df))

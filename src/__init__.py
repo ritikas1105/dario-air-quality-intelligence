@@ -1,1 +1,1 @@
-"""Supporting modules for the Air Quality & Health Risk Intelligence assignment."""
+"""Supporting modules for the Air Quality Operational Intelligence assignment."""

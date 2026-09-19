@@ -1,4 +1,4 @@
-# Air Quality & Health Risk Intelligence
+# Air Quality Operational Intelligence
 
 ## Project overview
 

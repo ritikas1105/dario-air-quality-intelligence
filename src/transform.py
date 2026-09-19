@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from math import isfinite
+
 import pandas as pd
 
 
 def aqi_category(aqi: float | int | None) -> str:
-    if pd.isna(aqi):
-        return "Unknown"
+    if pd.isna(aqi) or not isfinite(aqi) or aqi < 0:
+        return "Unavailable"
     if aqi <= 50:
         return "Good"
     if aqi <= 100:

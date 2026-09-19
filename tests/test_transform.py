@@ -1,13 +1,25 @@
+import pandas as pd
+import pytest
+
 from src.transform import aqi_category, build_city_summary, transform_city_payload
+
+
+@pytest.mark.parametrize("value", [None, float("nan"), pd.NA, float("inf"), float("-inf"), -1])
+def test_invalid_aqi_is_unavailable(value):
+    assert aqi_category(value) == "Unavailable"
 
 
 def test_aqi_category_boundaries():
     assert aqi_category(0) == "Good"
     assert aqi_category(50) == "Good"
     assert aqi_category(51) == "Moderate"
+    assert aqi_category(100) == "Moderate"
     assert aqi_category(101) == "Unhealthy for Sensitive Groups"
+    assert aqi_category(150) == "Unhealthy for Sensitive Groups"
     assert aqi_category(151) == "Unhealthy"
+    assert aqi_category(200) == "Unhealthy"
     assert aqi_category(201) == "Very Unhealthy"
+    assert aqi_category(300) == "Very Unhealthy"
     assert aqi_category(301) == "Hazardous"
 
 
