@@ -19,6 +19,7 @@ from src.config import (
     REQUEST_TIMEOUT_SECONDS,
 )
 from src.quality import run_quality_checks
+from src.schema import APIResponseValidationError, validate_city_payload
 from src.transform import build_city_summary, transform_city_payload
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -55,11 +56,11 @@ def extract_city(session: requests.Session, city: str, cfg: dict) -> dict:
     }
     response = session.get(API_URL, params=params, timeout=REQUEST_TIMEOUT_SECONDS)
     response.raise_for_status()
-    payload = response.json()
-    if payload.get("error"):
-        raise RuntimeError(payload.get("reason", f"API error for {city}"))
-    if not payload.get("hourly"):
-        raise ValueError(f"API returned no hourly data for {city}.")
+    try:
+        payload = response.json()
+    except requests.exceptions.JSONDecodeError as exc:
+        raise APIResponseValidationError("API response is not valid JSON") from exc
+    validate_city_payload(payload)
     return payload
 
 
@@ -88,16 +89,26 @@ def main() -> None:
 
     for city, cfg in CITIES.items():
         LOGGER.info("Fetching air-quality data for %s", city)
+        stage = "fetch"
         try:
             payload = extract_city(session, city, cfg)
+            stage = "transform"
+            frame = transform_city_payload(city, cfg["country"], payload)
+            stage = "persist_raw"
             raw_path = persist_raw(city, payload, run_id)
             LOGGER.info("Saved raw payload: %s", raw_path.relative_to(BASE_DIR))
-            frames.append(transform_city_payload(city, cfg["country"], payload))
+            frames.append(frame)
+            LOGGER.info("Processed %s: %s hourly rows", city, len(frame))
         except (requests.RequestException, ValueError, RuntimeError) as exc:
-            LOGGER.exception("Failed to process %s", city)
-            failures.append({"city": city, "error": str(exc)})
+            error_type = "schema_validation" if isinstance(exc, APIResponseValidationError) else type(exc).__name__
+            if isinstance(exc, APIResponseValidationError):
+                stage = "validate"
+            message = " ".join(str(exc).split())[:300]
+            LOGGER.warning("Failed city %s at %s (%s): %s", city, stage, error_type, message)
+            failures.append({"city": city, "stage": stage, "error_type": error_type, "message": message})
 
     if not frames:
+        LOGGER.error("ETL failed: all %s configured cities failed; existing outputs preserved.", len(CITIES))
         raise RuntimeError("ETL failed: no city data could be extracted.")
 
     hourly_df = pd.concat(frames, ignore_index=True)
@@ -130,7 +141,8 @@ def main() -> None:
 
     LOGGER.info("Processed %s rows across %s cities", len(hourly_df), hourly_df["city"].nunique())
     if failures:
-        LOGGER.warning("Partial API failures: %s", failures)
+        LOGGER.warning("Partial run: %s/%s cities failed: %s", len(failures), len(CITIES),
+                       ", ".join(failure["city"] for failure in failures))
     if (quality_df["status"] == "FAIL").any():
         LOGGER.warning("ETL completed with data-quality failures. Review %s", quality_path)
     elif (quality_df["status"] == "WARN").any():

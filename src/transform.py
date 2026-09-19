@@ -5,6 +5,7 @@ from math import isfinite
 import pandas as pd
 
 from src.quality import MAX_VALID_AQI, valid_aqi_mask
+from src.schema import APIResponseValidationError, validate_city_payload
 
 
 def aqi_category(aqi: float | int | None) -> str:
@@ -24,19 +25,19 @@ def aqi_category(aqi: float | int | None) -> str:
 
 
 def transform_city_payload(city: str, country: str, payload: dict) -> pd.DataFrame:
-    hourly = payload.get("hourly") or {}
-    times = hourly.get("time") or []
-
-    if not times:
-        raise ValueError(f"No hourly observations returned for {city}.")
-
+    hourly = validate_city_payload(payload)
     frame = pd.DataFrame(hourly)
     frame.insert(0, "city", city)
     frame.insert(1, "country", country)
     frame["latitude"] = payload.get("latitude")
     frame["longitude"] = payload.get("longitude")
     frame["timezone"] = payload.get("timezone")
-    frame["timestamp"] = pd.to_datetime(frame.pop("time"), errors="coerce")
+    try:
+        frame["timestamp"] = pd.to_datetime(frame.pop("time"), errors="coerce")
+        if not pd.api.types.is_datetime64_any_dtype(frame["timestamp"]):
+            raise APIResponseValidationError("Hourly time array has incompatible timestamp formats")
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise APIResponseValidationError("Hourly time array cannot be converted to timestamps") from exc
 
     numeric_columns = [
         "us_aqi",
