@@ -58,6 +58,7 @@ def test_default_dashboard_excludes_invalid_aqi_from_metrics_and_ranking(dashboa
     assert "Unavailable" in dashboard.sidebar.multiselect[1].options
     assert "Unknown" not in dashboard.sidebar.multiselect[1].options
     assert len(dashboard.get("plotly_chart")) == 3
+    assert any("AQI coverage: 50.0%" in caption.value for caption in dashboard.caption)
 
 
 def test_good_category_keeps_kpis_ranking_narrative_and_charts_consistent(dashboard):
@@ -73,6 +74,8 @@ def test_good_category_keeps_kpis_ranking_narrative_and_charts_consistent(dashbo
     assert table["avg_aqi"].tolist() == [40, 30]
     assert table["max_aqi"].tolist() == [40, 30]
     assert table["elevated_aqi_hours"].tolist() == [0, 0]
+    assert table["aqi_coverage_pct"].tolist() == [100, 100]
+    assert table["elevated_pct"].tolist() == [0, 0]
     assert "**Alpha**" in dashboard.info[0].value
     assert "peak AQI of 40" in dashboard.info[0].value
     charts = [json.loads(chart.proto.spec) for chart in dashboard.get("plotly_chart")]
@@ -113,6 +116,29 @@ def test_zero_valid_aqi_has_explicit_unavailable_state(dashboard, selection):
     assert not dashboard.metric
     assert not dashboard.dataframe
     assert not dashboard.get("plotly_chart")
+    assert any("AQI coverage: 0.0%" in caption.value for caption in dashboard.caption)
+
+
+def test_partial_coverage_and_completeness_warnings_are_visible(dashboard, tmp_path):
+    processed = tmp_path / "data" / "processed"
+    hourly = pd.read_csv(processed / "air_quality_hourly.csv").iloc[:2].copy()
+    hourly["us_aqi"] = [120, float("nan")]
+    hourly.to_csv(processed / "air_quality_hourly.csv", index=False)
+    pd.DataFrame([{"check": "aqi_completeness", "status": "WARN"}]).to_csv(
+        processed / "data_quality_report.csv", index=False
+    )
+    st.cache_data.clear()
+    app = AppTest.from_file(str(tmp_path / "app.py"), default_timeout=20).run()
+    assert not app.exception
+    assert metrics(app)["Completeness warnings"] == "1"
+    assert metrics(app)["Failed checks"] == "0"
+    assert any("AQI coverage: 50.0%" in caption.value for caption in app.caption)
+    row = app.dataframe[0].value.iloc[0]
+    assert row.expected_hours == 2
+    assert row.valid_aqi_hours == 1
+    assert row.elevated_pct == 100
+    assert row.aqi_coverage_pct == 50
+    assert "100.0% elevated among available AQI hours" in app.info[0].value
 
 
 @pytest.mark.parametrize("selection", ["combination", "no cities", "no categories"])

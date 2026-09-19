@@ -5,6 +5,18 @@ from typing import Iterable
 
 import pandas as pd
 
+# Existing broad plausibility limit, shared with analytical validity handling.
+MAX_VALID_AQI = 1000
+POLLUTANT_COLUMNS = [
+    "pm2_5", "pm10", "nitrogen_dioxide", "ozone", "sulphur_dioxide", "carbon_monoxide",
+]
+
+
+def valid_aqi_mask(values: pd.Series) -> pd.Series:
+    """Usable AQI is present, numeric, finite, and within the accepted range."""
+    numeric = pd.to_numeric(values, errors="coerce")
+    return numeric.between(0, MAX_VALID_AQI).fillna(False)
+
 
 @dataclass
 class QualityCheck:
@@ -18,132 +30,84 @@ class QualityCheck:
         return asdict(self)
 
 
-def _result(check: str, passed: bool, affected: int, details: str, severity: str = "high") -> QualityCheck:
+def _result(
+    check: str, affected: int, details: str, *, failed: bool | None = None,
+    warning: bool = False,
+) -> QualityCheck:
+    failed = affected > 0 if failed is None else failed
     return QualityCheck(
         check=check,
-        status="PASS" if passed else "FAIL",
-        severity="info" if passed else severity,
+        status=("WARN" if warning else "FAIL") if failed else "PASS",
+        severity=("medium" if warning else "high") if failed else "info",
         affected_rows=int(affected),
         details=details,
     )
 
 
 def run_quality_checks(df: pd.DataFrame, expected_cities: Iterable[str]) -> pd.DataFrame:
+    """Count affected rows per check, never cells or missing-city counts.
+
+    Dataset-level failures with no identifiable existing rows have a count of
+    zero; their status and details still record the failure. Counts across checks
+    overlap and must not be summed into a total number of bad rows.
+    """
     checks: list[QualityCheck] = []
-
-    required_columns = {
-        "city",
-        "country",
-        "timestamp",
-        "us_aqi",
-        "pm2_5",
-        "pm10",
-        "nitrogen_dioxide",
-        "ozone",
-        "sulphur_dioxide",
-        "carbon_monoxide",
-    }
+    required_columns = {"city", "country", "timestamp", "us_aqi", *POLLUTANT_COLUMNS}
     missing_columns = required_columns.difference(df.columns)
-    checks.append(
-        _result(
-            "required_columns",
-            not missing_columns,
-            len(missing_columns),
-            "All required columns are present."
-            if not missing_columns
-            else f"Missing columns: {sorted(missing_columns)}",
-        )
-    )
-
+    checks.append(_result(
+        "required_columns", len(df) if missing_columns else 0,
+        f"Missing columns: {sorted(missing_columns)}" if missing_columns
+        else "All required columns are present.",
+        failed=bool(missing_columns),
+    ))
     if missing_columns:
         return pd.DataFrame([c.to_dict() for c in checks])
 
-    duplicate_mask = df.duplicated(subset=["city", "timestamp"], keep=False)
-    duplicate_count = int(duplicate_mask.sum())
-    checks.append(
-        _result(
-            "duplicate_city_timestamp",
-            duplicate_count == 0,
-            duplicate_count,
-            "No duplicate city/timestamp rows found."
-            if duplicate_count == 0
-            else "Duplicate city/timestamp records were detected.",
-        )
-    )
+    missing_identifier = pd.Series(False, index=df.index)
+    for column in ("city", "country"):
+        missing_identifier |= df[column].isna() | df[column].astype("string").str.strip().eq("").fillna(False)
+    checks.append(_result("required_identifiers", missing_identifier.sum(),
+                          "City and country identifiers must be populated."))
+    checks.append(_result(
+        "duplicate_city_timestamp", df.duplicated(["city", "timestamp"], keep=False).sum(),
+        "Analytical keys (city, timestamp) must be unique.",
+    ))
+    checks.append(_result(
+        "valid_timestamps", pd.to_datetime(df["timestamp"], errors="coerce").isna().sum(),
+        "Timestamps must be populated and parseable.",
+    ))
+    checks.append(_result("aqi_completeness", df["us_aqi"].isna().sum(),
+                          "Rows with unavailable AQI measurements.", warning=True))
+    checks.append(_result(
+        "pollutant_completeness", df[POLLUTANT_COLUMNS].isna().any(axis=1).sum(),
+        "Rows with at least one unavailable pollutant measurement (each row counted once).",
+        warning=True,
+    ))
 
-    null_count = int(df[list(required_columns)].isna().sum().sum())
-    checks.append(
-        _result(
-            "required_field_nulls",
-            null_count == 0,
-            null_count,
-            "No nulls in required analytical fields."
-            if null_count == 0
-            else "Null values found in required analytical fields.",
-            severity="medium",
-        )
-    )
-
-    pollutant_columns = [
-        "pm2_5",
-        "pm10",
-        "nitrogen_dioxide",
-        "ozone",
-        "sulphur_dioxide",
-        "carbon_monoxide",
-    ]
-    negative_mask = (df[pollutant_columns] < 0).any(axis=1)
-    negative_count = int(negative_mask.sum())
-    checks.append(
-        _result(
-            "non_negative_pollutants",
-            negative_count == 0,
-            negative_count,
-            "All pollutant concentrations are non-negative."
-            if negative_count == 0
-            else "Negative pollutant concentrations were detected.",
-        )
-    )
-
-    invalid_aqi = (~df["us_aqi"].between(0, 1000, inclusive="both")).fillna(True)
-    invalid_aqi_count = int(invalid_aqi.sum())
-    checks.append(
-        _result(
-            "aqi_plausible_range",
-            invalid_aqi_count == 0,
-            invalid_aqi_count,
-            "AQI values are within the configured plausibility range (0-1000)."
-            if invalid_aqi_count == 0
-            else "AQI values outside the configured plausibility range were detected.",
-            severity="medium",
-        )
-    )
-
-    actual_cities = set(df["city"].dropna().unique())
-    expected_cities = set(expected_cities)
-    missing_cities = expected_cities - actual_cities
-    checks.append(
-        _result(
-            "expected_city_coverage",
-            not missing_cities,
-            len(missing_cities),
-            "All configured cities are represented in the processed dataset."
-            if not missing_cities
-            else f"Missing configured cities: {sorted(missing_cities)}",
-        )
-    )
-
-    unparsable_ts = pd.to_datetime(df["timestamp"], errors="coerce").isna()
-    bad_ts_count = int(unparsable_ts.sum())
-    checks.append(
-        _result(
-            "valid_timestamps",
-            bad_ts_count == 0,
-            bad_ts_count,
-            "All timestamps are parseable."
-            if bad_ts_count == 0
-            else "Unparseable timestamps were detected.",
-        )
-    )
-
+    measurements = df[["us_aqi", *POLLUTANT_COLUMNS]]
+    numeric = measurements.apply(pd.to_numeric, errors="coerce")
+    nonfinite = numeric.isin([float("inf"), float("-inf")])
+    invalid_numeric = measurements.notna() & (numeric.isna() | nonfinite)
+    checks.append(_result(
+        "finite_numeric_measurements", invalid_numeric.any(axis=1).sum(),
+        "Populated measurements must be numeric and finite; nulls are completeness warnings.",
+    ))
+    finite_aqi = numeric["us_aqi"].notna() & ~nonfinite["us_aqi"]
+    checks.append(_result(
+        "aqi_plausible_range",
+        (finite_aqi & ~numeric["us_aqi"].between(0, MAX_VALID_AQI)).sum(),
+        f"Finite AQI measurements must be within 0–{MAX_VALID_AQI}; nulls are excluded.",
+    ))
+    negative = numeric[POLLUTANT_COLUMNS].lt(0) & ~nonfinite[POLLUTANT_COLUMNS]
+    checks.append(_result(
+        "non_negative_pollutants", negative.any(axis=1).sum(),
+        "Populated finite pollutant measurements must be non-negative.",
+    ))
+    missing_cities = set(expected_cities) - set(df["city"].dropna().unique())
+    checks.append(_result(
+        "expected_city_coverage", 0,
+        f"Missing configured cities: {sorted(missing_cities)}; no existing rows to count."
+        if missing_cities else "All configured cities are represented.",
+        failed=bool(missing_cities),
+    ))
     return pd.DataFrame([c.to_dict() for c in checks])

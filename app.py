@@ -86,6 +86,12 @@ if filtered.empty:
     st.warning("No rows match the current filters.")
     st.stop()
 
+valid_aqi_hours = int(filtered["us_aqi"].notna().sum())
+st.caption(
+    f"AQI coverage: {valid_aqi_hours / len(filtered) * 100:.1f}% "
+    f"({valid_aqi_hours} of {len(filtered)} hours in the selected scope)."
+)
+
 if not filtered["us_aqi"].notna().any():
     st.info("AQI unavailable for the selected scope.")
     st.stop()
@@ -113,7 +119,7 @@ if not filtered_summary.empty:
     st.info(
         f"**{leader['city']}** ranks highest within the selected scope "
         f"(score {leader['operational_priority_score']:.1f}). It has a peak AQI of "
-        f"{leader['max_aqi']:.0f} and {leader['elevated_hour_pct']:.1f}% of observed/forecast hours above AQI 100."
+        f"{leader['max_aqi']:.0f} and {leader['elevated_pct']:.1f}% elevated among available AQI hours."
     )
 
 priority_display = filtered_summary[
@@ -125,11 +131,22 @@ priority_display = filtered_summary[
         "max_aqi",
         "avg_pm2_5",
         "elevated_aqi_hours",
-        "elevated_hour_pct",
+        "expected_hours",
+        "valid_aqi_hours",
+        "aqi_coverage_pct",
+        "elevated_pct",
         "operational_priority_score",
     ]
 ].sort_values("operational_priority_score", ascending=False)
-st.dataframe(priority_display, use_container_width=True, hide_index=True)
+st.dataframe(
+    priority_display, use_container_width=True, hide_index=True,
+    column_config={
+        "expected_hours": "Hours in selected scope",
+        "valid_aqi_hours": "Valid AQI hours",
+        "aqi_coverage_pct": "AQI coverage (%)",
+        "elevated_pct": "Elevated among available AQI hours (%)",
+    },
+)
 
 st.subheader("AQI trend")
 trend = filtered.groupby(["timestamp", "city"], as_index=False)["us_aqi"].mean()
@@ -171,10 +188,11 @@ with right:
 st.subheader("Data quality & pipeline health")
 st.caption("Pipeline checks below cover the full ETL run, independently of the city/category filters.")
 failed_checks = quality_df[quality_df["status"] == "FAIL"]
-q1, q2, q3 = st.columns(3)
+q1, q2, q3, q4 = st.columns(4)
 q1.metric("Quality checks", len(quality_df))
 q2.metric("Failed checks", len(failed_checks))
 q3.metric("ETL rows", metadata.get("row_count", len(hourly_df)))
+q4.metric("Completeness warnings", int((quality_df["status"] == "WARN").sum()))
 
 st.dataframe(quality_df, use_container_width=True, hide_index=True)
 

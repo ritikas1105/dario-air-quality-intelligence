@@ -124,6 +124,7 @@ def main() -> None:
         "failed_cities": failures,
         "row_count": int(len(hourly_df)),
         "quality_failures": int((quality_df["status"] == "FAIL").sum()),
+        "quality_warnings": int((quality_df["status"] == "WARN").sum()),
     }
     run_meta_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
@@ -131,7 +132,9 @@ def main() -> None:
     if failures:
         LOGGER.warning("Partial API failures: %s", failures)
     if (quality_df["status"] == "FAIL").any():
-        LOGGER.warning("ETL completed with data-quality warnings. Review %s", quality_path)
+        LOGGER.warning("ETL completed with data-quality failures. Review %s", quality_path)
+    elif (quality_df["status"] == "WARN").any():
+        LOGGER.warning("ETL completed with completeness warnings. Review %s", quality_path)
     else:
         LOGGER.info("All configured data-quality checks passed.")
 
