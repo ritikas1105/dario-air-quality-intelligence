@@ -19,7 +19,6 @@ st.set_page_config(
 )
 
 
-@st.cache_data
 def load_data() -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     hourly_path = PROCESSED_DIR / "air_quality_hourly.csv"
     quality_path = PROCESSED_DIR / "data_quality_report.csv"
@@ -51,6 +50,11 @@ st.title("Air Quality Operational Intelligence")
 st.caption(
     "A lightweight environmental-health decision product built from the Open-Meteo Air Quality API. "
     "It is designed for operational prioritization, not clinical diagnosis or medical advice."
+)
+st.caption(
+    "Source: [Open-Meteo](https://open-meteo.com/en/docs/air-quality-api) · "
+    "[CAMS / Copernicus atmospheric data](https://ads.atmosphere.copernicus.eu/). "
+    "City-local windows; cross-city rankings are directional, not synchronized comparisons."
 )
 
 try:

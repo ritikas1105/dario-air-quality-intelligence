@@ -1,241 +1,180 @@
 # Air Quality Operational Intelligence
 
-## Project overview
+A small, end-to-end Python data product for the Dario Health Senior AI Data Engineer assignment. It helps an operations or health-program analyst review **which configured cities have more elevated air-quality hours in the returned data window**, supported by AQI trends, PM2.5 comparisons, and visible data coverage.
 
-This project is a small end-to-end data product built for the AI Data Engineer home assignment. It uses the **Open-Meteo Air Quality API** to monitor hourly air-quality conditions across a fixed set of global cities and turns the API response into a business-facing operational view.
+The application is environmental operational intelligence. Its heuristic review-priority score is **not a clinical risk score, a population health-risk model, or a basis for patient-level advice**. It does not establish which pollutant caused an AQI change.
 
-The practical question is:
+## Run locally
 
-> Which monitored cities are likely to experience elevated air-quality exposure, what is driving it, and where should a health program or operations team pay attention first?
+Validated locally on macOS with **Python 3.9.6**, using the pinned dependencies in `requirements.txt`. No API key, database, container, or cloud account is needed.
 
-The application is deliberately lightweight. It focuses on reproducibility, transparent ETL, data-quality checks, business-readable analytics, and a clean local run experience rather than infrastructure complexity.
-
-> **Important:** This is an environmental-health analytics product, not a clinical decision system. The operational priority score is not a medical risk score.
-
-## Selected API
-
-**Open-Meteo Air Quality API**  
-Endpoint: `https://air-quality-api.open-meteo.com/v1/air-quality`
-
-Why it was selected:
-
-- Free and keyless for this use case
-- No private credentials or manual data preparation
-- Hourly AQI and pollutant measures are directly useful for a health-adjacent product
-- Supports reproducible API extraction and clear analytical transformations
-- Reviewer can run the project immediately after cloning
-
-The ETL requests US AQI, PM2.5, PM10, NO2, O3, SO2, and CO for seven configured cities. It includes two past days and five forecast days to give enough history/context for a useful dashboard.
-
-## Architecture
-
-```text
-Open-Meteo Air Quality API
-          |
-          v
-     Python extraction
-   retries + timeout + validation
-          |
-          +---------------------> data/raw/*.json
-          |
-          v
-  normalization / enrichment
-  AQI category + flags + dates
-          |
-          v
-      data quality checks
-          |
-          +---------------------> data/processed/data_quality_report.csv
-          |
-          v
-  analytical output tables
-          |
-          +---------------------> air_quality_hourly.csv
-          +---------------------> city_summary.csv
-          +---------------------> etl_run_metadata.json
-          |
-          v
-     Streamlit dashboard
-```
-
-## Repository structure
-
-```text
-README.md
-requirements.txt
-app.py
-etl.py
-src/
-  __init__.py
-  config.py
-  quality.py
-  transform.py
-tests/
-  test_quality.py
-  test_transform.py
-data/
-  raw/
-  processed/
-ai_transcript/
-  transcript.md
-```
-
-## How to run locally
+### macOS / Linux
 
 ```bash
-git clone <repository-url>
-cd <repository-folder>
-python -m venv .venv
-# Windows: .venv\Scripts\activate
-# macOS/Linux: source .venv/bin/activate
-pip install -r requirements.txt
+git clone https://github.com/ritikas1105/dario-air-quality-intelligence.git
+cd dario-air-quality-intelligence
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m streamlit run app.py
+```
+
+### Windows PowerShell
+
+```powershell
+git clone https://github.com/ritikas1105/dario-air-quality-intelligence.git
+cd dario-air-quality-intelligence
+py -3 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe -m streamlit run app.py
+```
+
+Windows/Linux instructions use the same modules but were not separately executed on those operating systems.
+
+The dashboard initially uses the **committed sample snapshot**, so reviewing it needs no live API request. Check the displayed ETL timestamp; the sample is a dated model snapshot, not current conditions.
+
+To refresh data, stop the dashboard, run the ETL, wait for completion, then restart the dashboard:
+
+```bash
 python etl.py
-streamlit run app.py
+python -m streamlit run app.py
 ```
 
-Optional test run:
+On Windows, substitute `.venv\Scripts\python.exe` for `python`. Do not run concurrent ETL processes or read the snapshot while publication is in progress. The dashboard rereads processed files on each interaction; no cached snapshot needs clearing after a completed refresh.
+
+Run the complete tests:
 
 ```bash
-pytest -q
+python -m pytest -q
 ```
 
-No Docker, database, cloud account, API key, or private package is required.
+The local Apple Python emits a `NotOpenSSLWarning` because it uses LibreSSL 2.8.3 with urllib3 v2. API requests and tests completed successfully in this environment; the warning remains a portability limitation. A Python build linked to supported OpenSSL avoids that mismatch. Streamlit's optional Watchdog suggestion does not prevent execution.
 
-## ETL flow
+## Source and attribution
 
-### 1. Extract
+Data is retrieved from the [Open-Meteo Air Quality API](https://open-meteo.com/en/docs/air-quality-api), backed by **Copernicus Atmosphere Monitoring Service (CAMS)** atmospheric forecasts, including **CAMS European ENSEMBLE** and global composition data. Credit: Open-Meteo and the [CAMS / Copernicus Atmosphere Data Store and contributing providers](https://ads.atmosphere.copernicus.eu/), following the API's [attribution instructions](https://open-meteo.com/en/docs/air-quality-api#citation).
 
-`etl.py` loops over a small configured city list and requests hourly air-quality data from Open-Meteo.
+Endpoint: `https://air-quality-api.open-meteo.com/v1/air-quality`. This assignment uses the keyless public API. Consult the provider's usage terms for other deployments.
 
-Reliability features:
+The API was chosen because it supplies useful environmental measurements without private credentials. The project requests US AQI, PM2.5, PM10, NO2, O3, SO2, and CO for Delhi, Mumbai, Bengaluru, London, New York, San Francisco, and Singapore. Coordinates are fixed in `src/config.py` to keep the example small and reproducible; they do not represent a validated target population.
 
-- HTTP timeout
-- Retry with exponential backoff
-- Retries for rate limits and common 5xx responses
-- City-level exception handling
-- Raw API response persisted locally with fetch timestamp and source metadata
-- Partial city failures are recorded instead of silently ignored
-- ETL fails if no city can be retrieved at all
+These are model outputs, including past model data and forecasts, rather than regulatory ground-station observations. Returned coordinates may refer to model grid cells. Forecast availability can leave measurement gaps, especially near the returned horizon. See the [provider documentation](https://open-meteo.com/en/docs/air-quality-api) for model domains, units, and availability.
 
-### 2. Transform
-
-Each API payload is normalized into a tabular hourly grain:
-
-**Grain:** one row per city per local hourly timestamp.
-
-Core columns:
-
-- city / country
-- timestamp / timezone
-- latitude / longitude
-- US AQI
-- PM2.5 / PM10
-- NO2 / O3 / SO2 / CO
-- AQI category
-- elevated-AQI flag (`AQI > 100`)
-- unhealthy-AQI flag (`AQI > 150`)
-- local date
-
-A city-level summary is also produced with:
-
-- average and peak AQI
-- average and peak PM2.5
-- hours above AQI 100
-- hours above AQI 150
-- share of elevated hours
-- operational priority score
-
-### 3. Operational priority score
-
-The score is intentionally simple and transparent:
+## Architecture and repository
 
 ```text
-50% = share of hours with AQI > 100
-35% = capped peak AQI contribution
-15% = capped average PM2.5 contribution
+Open-Meteo -> fetch/retry -> validate response -> transform each valid city
+                                                |              |
+                                         raw JSON archive      v
+                                                     combine hourly rows
+                                                              |
+                                                  quality checks + summary
+                                                              |
+                                            stage all four processed outputs
+                                                              |
+                                                publish local CSV/JSON snapshot
+                                                              |
+                                                     Streamlit dashboard
 ```
 
-It exists only to rank locations for operational review. It must not be interpreted as a clinical or patient-level risk score.
+- `etl.py`: orchestration, HTTP requests, raw persistence, logging and run metadata.
+- `src/config.py`: seven configured cities, requested variables, timeout and window settings.
+- `src/schema.py`: lightweight city-response contract and intentional validation errors.
+- `src/transform.py`: normalization, AQI categories, coverage, and analytical summaries.
+- `src/quality.py`: completeness, structural and numeric validity checks.
+- `src/storage.py`: temporary writes, replacement, rollback and cleanup.
+- `app.py`: filters, KPIs, ranking, charts and pipeline health.
+- `tests/`: transformation, quality, mocked ETL, publication and Streamlit AppTest regressions.
+- `data/raw/`: source responses for the submitted snapshot.
+- `data/processed/`: analytical CSVs and completed-run metadata.
+- `ai_transcript/transcript.md`: reserved for the genuine finalized AI transcript; see AI usage below.
 
-## Data quality checks
+JSON retains source evidence; CSV makes this small dataset easy to inspect. Neither a database nor a distributed processing system is justified here.
 
-The ETL writes a visible quality report and surfaces it in Streamlit.
+## Data model and ETL contract
 
-Checks include:
+| Artifact | Grain / key |
+|---|---|
+| Raw JSON | One response per successful city/run, with city, source and UTC fetch timestamp |
+| `air_quality_hourly.csv` | One city/local hourly timestamp within the snapshot; expected key `(city, timestamp)` |
+| `city_summary.csv` | One city/country over its returned window |
+| `data_quality_report.csv` | One check result for the entire snapshot |
+| `etl_run_metadata.json` | One completed run: run ID, cities, row count, failure and warning counts |
 
-1. Required columns exist
-2. No duplicate `(city, timestamp)` records
-3. Required analytical fields do not contain nulls
-4. Pollutant concentrations are non-negative
-5. AQI is inside a broad plausibility range
-6. All configured cities are represented
-7. Timestamps are parseable
+Requests have a 30-second timeout and up to three retries for eligible failures, including rate limits and common server errors. Backoff is exponential. A timeout is not a total pipeline deadline.
 
-This approach keeps quality rules explicit and auditable rather than burying them inside transformation code.
+The decoded response and `hourly` must be objects. Non-empty `time` and `us_aqi` arrays are required and must align. All pollutant arrays, including PM2.5, are optional; absent arrays become null analytical columns. Supplied arrays must align and contain supported values. Extra hourly fields are ignored. The original response is retained without fabricated measurements.
 
-## Dashboard overview
+PM2.5 is needed for the existing score, but not for retaining a city's AQI data. If no valid AQI or no usable PM2.5 is available, its score and rank are unavailable. The score is not reweighted to hide missing inputs.
 
-The Streamlit application includes:
+A malformed city or failed request is logged and skipped while other cities continue. Metadata records `city`, `stage`, `error_type`, and a concise `message`, without stack traces. Missing configured cities also appear as quality failures. If every city fails, the ETL raises an error and leaves previous processed outputs untouched; it does not publish empty success data. In this case existing metadata still describes the last completed run; inspect the failed command's logs.
 
-- City and AQI-category filters
-- Monitored-city count
-- Average and peak AQI
-- Hours above AQI 100
-- Ranked operational-priority table
-- AQI trend over time
-- Average PM2.5 comparison
-- AQI category mix
-- Data-quality and ETL health section
-- Plain-language explanation of how the product should and should not be interpreted
+## Data quality and coverage
 
-## Assumptions
+- **PASS:** the check found no issue.
+- **WARN:** measurement incompleteness, such as missing AQI or pollutant values.
+- **FAIL:** missing required analytical columns/identifiers, duplicate keys, invalid timestamps, invalid numeric values, negative pollutant concentrations, finite AQI outside the project's broad 0–1000 plausibility range, or missing configured cities.
 
-- City coordinates are intentionally configured in code instead of calling a second geocoding API. This removes an unnecessary dependency and makes runs deterministic.
-- Open-Meteo local timezone output is kept for stakeholder readability.
-- US AQI is used as a common comparison metric across monitored locations.
-- The project uses API/model output and does not claim to represent regulatory ground-station observations.
-- The AQI threshold flags are operational labels, not clinical recommendations.
+Null AQI is a completeness warning and is excluded from numeric-range checks. Infinite values are invalid; missing optional columns are materialized before quality checks. `affected_rows` counts rows once per check, not cells. Counts can overlap across checks and must not be summed. A missing-city check reports zero existing affected rows and lists absent cities in its details.
 
-## Known limitations
+For each city and selected analytical scope:
 
-- The city list is intentionally small and static.
-- There is no historical warehouse or incremental partitioning strategy because the assignment requires only a local runnable product.
-- CSV is used for reviewer simplicity. For larger workloads I would use Parquet and partition by date/city.
-- API availability is an external dependency. Retries reduce transient failures but cannot eliminate upstream outages.
-- The prioritization model is heuristic and is not validated for clinical use.
-- Forecast and past values should not be treated as equivalent to patient-level health outcomes.
+```text
+expected_hours      = number of included rows
+valid_aqi_hours     = rows with numeric, finite AQI within 0–1000
+elevated_aqi_hours  = valid AQI hours above 100
+unhealthy_aqi_hours = valid AQI hours above 150
+aqi_coverage_pct    = 100 * valid_aqi_hours / expected_hours
+elevated_pct        = 100 * elevated_aqi_hours / valid_aqi_hours
+```
 
-## AI usage
+`expected_hours` is the returned/selected row count, not a reconstructed complete calendar. Empty input is handled safely. With no valid AQI, elevated percentage, score and rank are unavailable. `[120, null]` therefore has **50% coverage and 100% elevated among available AQI hours**.
 
-AI was used as a working partner for:
+AQI categories are Good (0–50), Moderate (>50–100), Unhealthy for Sensitive Groups (>100–150), Unhealthy (>150–200), Very Unhealthy (>200–300), and Hazardous (>300 within the accepted range). Missing or invalid AQI is **Unavailable**, never Hazardous. These are display categories, not medical recommendations.
 
-- decomposing the assignment and evaluation criteria
-- comparing possible public API/product ideas
-- selecting a health-relevant but technically manageable direction
-- designing the ETL/data model
-- identifying reliability and quality checks
-- reviewing code structure and edge cases
-- drafting test scenarios and documentation
-- challenging unnecessary complexity and keeping the solution reviewer-friendly
+Quality results are diagnostic: a completed partial run can publish with FAIL results for inspection. There is no blanket quality-based publication gate. Invalid AQI and invalid PM2.5 are excluded from score inputs; consult the quality report before interpreting a run.
 
-The AI conversation is included under `ai_transcript/`. The candidate should export/copy the full visible conversation from the AI tool into that folder before final submission so the repository contains the exact transcript reviewed by the hiring team.
+## Heuristic review-priority score
 
-## What I would improve with more time
+```text
+score = 0.50 * elevated_pct
+      + 0.35 * (min(max_aqi, 300) / 300 * 100)
+      + 0.15 * min(avg_pm2_5, 100)
+```
 
-1. Add configurable locations from the UI while keeping a deterministic default city set.
-2. Store processed data as partitioned Parquet for scale and type fidelity.
-3. Add schema validation with Pandera or Pydantic.
-4. Add integration tests with mocked API responses and failure scenarios.
-5. Add data freshness alerts and an explicit SLA/freshness panel.
-6. Add CI to run tests and linting on every push.
-7. If used inside a health platform, join this environmental context to properly consented/aggregated cohorts and validate any downstream prioritization logic with clinical and privacy stakeholders.
+Components contribute at most 50, 35 and 15 points for valid inputs. Percentages and means are rounded to one decimal before scoring; the score is rounded to one decimal. Sorting uses descending score, then peak AQI. Unavailable scores receive no rank.
 
-## Why this design
+The weights favor sustained elevation, then peaks, then average PM2.5. They are transparent demonstration choices, not empirically validated weights. Peak AQI is sensitive to isolated hours, PM2.5 overlaps with information already in AQI, and close rankings can change with weights or coverage. The score is solely for **operational review prioritization**, not clinical or population risk estimation.
 
-The assignment asks for practical judgment and end-to-end ownership. I therefore optimized for a project that is:
+## Dashboard behavior
 
-- useful enough to explain in business terms
-- easy to run in a few commands
-- explicit about data quality and failures
-- structured like maintainable production code
-- small enough for a reviewer to understand quickly
+City and AQI-category selections apply to business KPIs, recomputed rankings, the priority callout, and charts. Coverage refers to the selected rows; filtering out Unavailable rows changes that denominator. Global pipeline-health checks are explicitly labeled as covering the entire ETL run.
+
+The dashboard provides AQI trends, average PM2.5 comparisons, category counts, and a ranked review table. Across cities, the elevated-hour KPI counts city-hours rather than distinct simultaneous clock hours. An unavailable-only selection shows a clear message; zero-result filters stop gracefully. Missing processed files show the ETL command to run.
+
+## Publication guarantees and limitations
+
+All four processed outputs are serialized in memory, then written to a temporary directory. Final files are untouched until every temporary write and backup succeeds. Replacement errors trigger restoration of previous files; temporary files are removed after success or successful rollback. If rollback itself fails, recovery files are retained and an explicit error identifies their location.
+
+This is a **single-process local publication mechanism**, not a multi-file filesystem transaction. Do not read during publication or run concurrent writers. A process kill, power loss, or unrecoverable filesystem failure may require recovery. Raw extracts are written separately and can remain after a later publication failure. The submitted raw directory contains only the responses corresponding to the final committed processed snapshot; earlier snapshots remain in Git history.
+
+## Time windows and other limitations
+
+The ETL deliberately retains `timezone=auto`, two past days and five forecast days. Timestamps are city-local, without a unified UTC analytical column. Around midnight, cities can receive different calendar-date windows. The trend chart compares local clock labels, not necessarily simultaneous instants. Past and future model values are summarized together.
+
+Cross-city ranking is therefore **directional operational comparison**, not a perfectly synchronized simultaneous comparison or a current-conditions alert. Local timestamps can also be ambiguous around daylight-saving transitions. Synchronized UTC windows are deferred rather than introducing a rushed timezone migration.
+
+API refreshes return evolving data; reproducibility of a stored snapshot does not imply identical future API responses. Missing values, small fixed city coverage, diagnostic rather than gating quality checks, and heuristic scoring limit interpretation.
+
+## AI usage and final submission
+
+AI assisted decomposition, implementation, review, failure simulation, testing, and documentation. The submission repository will include the genuine AI conversation at `ai_transcript/transcript.md` **once finalized**. It is intentionally not part of this technical commit. No transcript content has been fabricated.
+
+## With more time
+
+1. Use an identical UTC comparison window and distinguish past estimates from future forecasts.
+2. Define business-approved coverage thresholds and publication gates, plus freshness/failed-refresh status.
+3. Add automated CI for the existing test suite and validate additional Python/OS environments.
+4. Validate score sensitivity with the intended analyst, or replace it with a simpler explicit ordering.
+
+The priority is correctness and clear operational meaning, not additional infrastructure.

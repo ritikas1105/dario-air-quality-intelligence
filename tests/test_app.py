@@ -156,3 +156,14 @@ def test_empty_filtered_scope_stops_gracefully(dashboard, selection):
     assert not dashboard.metric
     assert not dashboard.dataframe
     assert not dashboard.get("plotly_chart")
+
+
+def test_rerun_reads_refreshed_files(dashboard, tmp_path):
+    hourly_path = tmp_path / 'data/processed/air_quality_hourly.csv'
+    hourly = pd.read_csv(hourly_path)
+    hourly['us_aqi'] = 10
+    hourly.to_csv(hourly_path, index=False)
+    dashboard.run()
+    assert not dashboard.exception
+    assert metrics(dashboard)['Average AQI'] == '10'
+    assert metrics(dashboard)['Peak AQI'] == '10'

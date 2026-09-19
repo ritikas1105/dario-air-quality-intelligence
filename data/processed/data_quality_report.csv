@@ -1,8 +1,11 @@
 check,status,severity,affected_rows,details
 required_columns,PASS,info,0,All required columns are present.
-duplicate_city_timestamp,PASS,info,0,No duplicate city/timestamp rows found.
-required_field_nulls,FAIL,medium,61,Null values found in required analytical fields.
-non_negative_pollutants,PASS,info,0,All pollutant concentrations are non-negative.
-aqi_plausible_range,FAIL,medium,7,AQI values outside the configured plausibility range were detected.
-expected_city_coverage,PASS,info,0,All configured cities are represented in the processed dataset.
-valid_timestamps,PASS,info,0,All timestamps are parseable.
+required_identifiers,PASS,info,0,City and country identifiers must be populated.
+duplicate_city_timestamp,PASS,info,0,"Analytical keys (city, timestamp) must be unique."
+valid_timestamps,PASS,info,0,Timestamps must be populated and parseable.
+aqi_completeness,WARN,medium,40,Rows with unavailable AQI measurements.
+pollutant_completeness,WARN,medium,46,Rows with at least one unavailable pollutant measurement (each row counted once).
+finite_numeric_measurements,PASS,info,0,Populated measurements must be numeric and finite; nulls are completeness warnings.
+aqi_plausible_range,PASS,info,0,Finite AQI measurements must be within 0–1000; nulls are excluded.
+non_negative_pollutants,PASS,info,0,Populated finite pollutant measurements must be non-negative.
+expected_city_coverage,PASS,info,0,All configured cities are represented.

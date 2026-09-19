@@ -20,6 +20,7 @@ from src.config import (
 )
 from src.quality import run_quality_checks
 from src.schema import APIResponseValidationError, validate_city_payload
+from src.storage import publish_snapshot
 from src.transform import build_city_summary, transform_city_payload
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -117,14 +118,7 @@ def main() -> None:
     quality_df = run_quality_checks(hourly_df, CITIES.keys())
     city_summary_df = build_city_summary(hourly_df)
 
-    hourly_path = PROCESSED_DIR / "air_quality_hourly.csv"
-    summary_path = PROCESSED_DIR / "city_summary.csv"
     quality_path = PROCESSED_DIR / "data_quality_report.csv"
-    run_meta_path = PROCESSED_DIR / "etl_run_metadata.json"
-
-    hourly_df.to_csv(hourly_path, index=False)
-    city_summary_df.to_csv(summary_path, index=False)
-    quality_df.to_csv(quality_path, index=False)
 
     metadata = {
         "run_id": run_id,
@@ -137,7 +131,13 @@ def main() -> None:
         "quality_failures": int((quality_df["status"] == "FAIL").sum()),
         "quality_warnings": int((quality_df["status"] == "WARN").sum()),
     }
-    run_meta_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    outputs = {
+        "air_quality_hourly.csv": hourly_df.to_csv(index=False),
+        "city_summary.csv": city_summary_df.to_csv(index=False),
+        "data_quality_report.csv": quality_df.to_csv(index=False),
+        "etl_run_metadata.json": json.dumps(metadata, indent=2),
+    }
+    publish_snapshot(PROCESSED_DIR, outputs)
 
     LOGGER.info("Processed %s rows across %s cities", len(hourly_df), hourly_df["city"].nunique())
     if failures:
